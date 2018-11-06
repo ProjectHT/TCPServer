@@ -36,9 +36,9 @@ void *TCPSERVERTHREAD(void *threadid) {
         m_client.ID = p_server->GetNewID();
     }
     int size = 0;
-    char *buffer = new char[TCP_CLIENT_LIMIT_DATA];
-    while(p_client->isRunning()) {
-        
+    char *buffer = new char[TCP_SERVER_LIMIT_DATA];
+    while(p_client->isRunning())
+    {
         int size = read(p_client->getSocket(), buffer, TCP_CLIENT_LIMIT_DATA);
         if(size > 0) {
             p_client->hadData(buffer, size);
@@ -92,6 +92,7 @@ bool TcpServer::start() {
 int TcpServer::getSocket() {
     return this->m_socket;
 }
+/*************************************************************************************************/
 bool TcpServer::isRunning() {
     return this->running;
 }
