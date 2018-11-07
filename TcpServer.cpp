@@ -35,17 +35,45 @@ void *TCPSERVERTHREAD(void *threadid) {
         m_client.Socket = newsockfd;
         m_client.ID = p_server->GetNewID();
     }
+    pthread_exit(NULL);
+}
+/*************************************************************************************************/
+void *TCPMYCLIENTTHREAD(void *threadid) {
+    TcpServer::MyClient* p_client = (TcpServer::MyClient*)threadid;
     int size = 0;
-    char *buffer = new char[TCP_CLIENT_LIMIT_DATA];
+    char *buffer = new char[TCP_SERVER_LIMIT_DATA];
     while(p_client->isRunning()) {
-        
-        int size = read(p_client->getSocket(), buffer, TCP_CLIENT_LIMIT_DATA);
+        int size = read(p_client->Socket, buffer, TCP_SERVER_LIMIT_DATA);
         if(size > 0) {
             p_client->hadData(buffer, size);
         }
         usleep(1);
     }
     pthread_exit(NULL);
+}
+/*************************************************************************************************/
+TcpServer::MyClient::MyClient(TcpServer* m_server, string m_id, int m_socket) {
+    this->p_server = m_server;
+    this->ID = m_id;
+    this->Socket = m_socket;
+}
+/*************************************************************************************************/
+void TcpServer::MyClient::hadData(void*, int) {
+    this->p_server->hadData(this, void*, int);
+}
+/*************************************************************************************************/
+void TcpServer::MyClient::disconnect() {
+    this->p_server->disconnect(this);
+}
+/*************************************************************************************************/
+bool TcpServer::MyClient::start() {
+    pthread_t thread;
+    this->running = true;
+    if(pthread_create(&thread, NULL, TCPMYCLIENTTHREAD, (void*)(this))) {
+        this->running = false;
+        return false;
+    }
+    return true;
 }
 /*************************************************************************************************/
 TcpServer::TcpServer(int port) {
