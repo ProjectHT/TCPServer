@@ -14,10 +14,26 @@
 #include "TcpServer.h"
 /*************************************************************************************************/
 static const char alphanum[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+static int alphanumLength = sizeof(alphanum) - 1;
+/*************************************************************************************************/
+#ifndef LOG_TAG_TCP_CLIENT_OF_SERVER
+#define LOG_TAG_TCP_CLIENT_OF_SERVER "Log::Client : "
+#endif
+/*************************************************************************************************/
+#ifndef LOG_TAG_TCP_SERVER
+#define LOG_TAG_TCP_SERVER "Log::Server : "
+#endif
+/*************************************************************************************************/
+char genRandom() {
+    return alphanum[rand() % alphanumLength];
+}
 /*************************************************************************************************/
 string Random(int length) {
-    string str(length,0);
-    generate_n(str.begin(), length, alphanum);
+    srand(time(0));
+    string str;
+    for(unsigned int i = 0; i < length; ++i) {
+        str += genRandom();
+    }
     return str;
 }
 /*************************************************************************************************/
@@ -25,15 +41,21 @@ void *TCPSERVERTHREAD(void *threadid) {
     TcpServer* p_server = (TcpServer*)threadid;
     listen(p_server->getSocket(),100);
     while(p_server->isRunning()) {
+        cout << LOG_TAG_TCP_SERVER << "Wait new client connect to server" << endl;
         struct sockaddr_in cli_addr;
         socklen_t clilen = sizeof(cli_addr);
         int newsockfd = accept(p_server->getSocket(), (struct sockaddr *) &cli_addr, &clilen);
         if(newsockfd < 0) {
             continue;
         }
-        Client m_client;
-        m_client.Socket = newsockfd;
-        m_client.ID = p_server->GetNewID();
+        p_server->ListClient.push_back(TcpServer::MyClient(p_server, p_server->GetNewID(), newsockfd));
+        int t_index = p_server->ListClient.size() - 1;
+        if(p_server->ListClient.at(t_index).start()) {
+            cout << LOG_TAG_TCP_SERVER << "Add new client with id[" << p_server->ListClient.at(t_index).ID << "]" << endl;
+        } else {
+            p_server->ListClient.erase(p_server->ListClient.begin()+t_index);
+        }
+        cout << LOG_TAG_TCP_SERVER << "Number client : " << p_server->ListClient.size() << endl;
     }
     pthread_exit(NULL);
 }
@@ -49,6 +71,14 @@ void *TCPMYCLIENTTHREAD(void *threadid) {
         }
         usleep(1);
     }
+    p_client->disconnect();
+    close(p_client->Socket);
+    for(int i = 0; i < p_client->p_server->ListClient.size(); i++) {
+        if(p_client->ID.compare(p_client->p_server->ListClient.at(i).ID) == 0) {
+            p_client->p_server->ListClient.erase(p_client->p_server->ListClient.begin()+i);
+            break;
+        }
+    }
     pthread_exit(NULL);
 }
 /*************************************************************************************************/
@@ -58,22 +88,39 @@ TcpServer::MyClient::MyClient(TcpServer* m_server, string m_id, int m_socket) {
     this->Socket = m_socket;
 }
 /*************************************************************************************************/
-void TcpServer::MyClient::hadData(void*, int) {
-    this->p_server->hadData(this, void*, int);
+TcpServer::MyClient::~MyClient() {
+    if(this->running) {
+        stop();
+        sleep(5);
+    }
+}
+/*************************************************************************************************/
+void TcpServer::MyClient::hadData(void* data, int length) {
+    cout << LOG_TAG_TCP_CLIENT_OF_SERVER << "Had msg from id[" << this->ID << "]" << endl;
+    this->p_server->hadData(this, data, length);
 }
 /*************************************************************************************************/
 void TcpServer::MyClient::disconnect() {
+    cout << LOG_TAG_TCP_CLIENT_OF_SERVER << "Disconnect with id[" << this->ID << "]" << endl;
     this->p_server->disconnect(this);
 }
 /*************************************************************************************************/
 bool TcpServer::MyClient::start() {
-    pthread_t thread;
-    this->running = true;
-    if(pthread_create(&thread, NULL, TCPMYCLIENTTHREAD, (void*)(this))) {
-        this->running = false;
-        return false;
+    if(this->running == false) {
+        pthread_t thread;
+        this->running = true;
+        if(pthread_create(&thread, NULL, TCPMYCLIENTTHREAD, (void*)(this))) {
+            this->running = false;
+            return false;
+        }
     }
     return true;
+}
+/*************************************************************************************************/
+void TcpServer::MyClient::stop() {
+    if(this->running) {
+        this->running = false;
+    }
 }
 /*************************************************************************************************/
 TcpServer::TcpServer(int port) {
@@ -85,16 +132,16 @@ TcpServer::TcpServer(int port) {
 TcpServer::~TcpServer() {
 }
 /*************************************************************************************************/
-bool TcpServer::sendData(Client& client,string data) {
-    if(send(client.Socket, data.c_str(), strlen(data.c_str()), 0) == -1) {
+bool TcpServer::sendData(MyClient* t_client,string data) {
+    if(send(t_client->Socket, data.c_str(), strlen(data.c_str()), 0) == -1) {
         return false;
     } else {
         return true;
     }
 }
 /*************************************************************************************************/
-bool TcpServer::sendData(Client& client,void* data, int length) {
-    if(send(client.Socket, data, length, 0) == -1) {
+bool TcpServer::sendData(MyClient* t_client,void* data, int length) {
+    if(send(t_client->Socket, data, length, 0) == -1) {
         return false;
     } else {
         return true;
@@ -120,8 +167,21 @@ bool TcpServer::start() {
 int TcpServer::getSocket() {
     return this->m_socket;
 }
+/*************************************************************************************************/
 bool TcpServer::isRunning() {
     return this->running;
+}
+/*************************************************************************************************/
+void TcpServer::stopClient(MyClient* t_client) {
+    t_client->stop();
+    for(int i = 0; i < ListClient.size(); i++) {
+        if(t_client->ID.compare(ListClient.at(i).ID) == 0) {
+            if(ListClient.at(i).isRunning()) {
+                ListClient.at(i).stop();
+                break;
+            }
+        }
+    }
 }
 /*************************************************************************************************/
 string TcpServer::GetNewID() {
